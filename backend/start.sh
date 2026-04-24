@@ -22,7 +22,6 @@ echo "=== Install PM2 (process manager) ==="
 sudo npm install -g pm2
 
 echo "=== Install Dependencies ==="
-cd /home/ubuntu/backend
 npm install
 
 echo "=== Setup complete ==="
