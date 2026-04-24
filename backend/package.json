@@ -1,0 +1,19 @@
+{
+  "name": "devops-3-tier-backend",
+  "version": "1.0.0",
+  "description": "AWS 3-Tier 실습용 방명록 백엔드",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "mysql2": "^3.6.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

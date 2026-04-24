@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AWS 3-Tier 실습 방명록</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📝 AWS 실습 방명록</h1>
+      <p class="subtitle">S3 + CloudFront + ALB + EC2 + RDS</p>
+    </header>
+
+    <div id="server-info" class="server-info">
+      <span class="label">응답한 서버:</span>
+      <span id="server-id">확인 중...</span>
+    </div>
+
+    <form id="messageForm" class="message-form">
+      <input
+        type="text"
+        id="name"
+        placeholder="이름"
+        maxlength="100"
+        required
+      >
+      <textarea
+        id="content"
+        placeholder="메시지를 입력하세요"
+        rows="3"
+        required
+      ></textarea>
+      <button type="submit">작성</button>
+    </form>
+
+    <div class="stats">
+      <span id="count">0</span>개의 메시지
+      <button id="refreshBtn" class="refresh-btn">새로고침</button>
+    </div>
+
+    <div id="messages" class="messages"></div>
+
+    <footer>
+      <small>5초마다 자동 새로고침 · 서버 ID가 바뀌면 ALB가 동작하는 것입니다</small>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
