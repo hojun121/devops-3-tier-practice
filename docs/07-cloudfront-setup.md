@@ -47,19 +47,6 @@ CloudFront 콘솔 → Create distribution
 
 ⚠️ "S3 bucket policy needs updating" 알림 표시 → 나중에 처리
 
-### Default cache behavior
-
-- Viewer protocol policy: **Redirect HTTP to HTTPS**
-- Allowed HTTP methods: **GET, HEAD**
-- Cache policy: **CachingOptimized**
-
-### Settings
-
-- Price class: **Use only North America and Europe** (실습 비용 절감)
-  - 또는 "Use all edge locations" (권장)
-- Alternate domain name (CNAME): (공란, 커스텀 도메인 없으면)
-- Default root object: `index.html`
-
 Create distribution.
 
 배포까지 약 5~15분 소요.
@@ -265,14 +252,6 @@ CloudFront (dxxx.cloudfront.net)
 ```
 
 축하합니다! 완전한 3-Tier 웹 아키텍처가 완성되었습니다.
-
-## 다음 단계 (선택)
-
-- Route 53으로 커스텀 도메인 연결
-- ACM으로 HTTPS 인증서 발급
-- WAF 연동
-- Auto Scaling 적용
-- CI/CD 파이프라인 구축
 
 ## 비용 정리 주의 ⚠️
 
