@@ -766,7 +766,7 @@ GitHub repo 페이지로 이동한다.
 |---|---|
 | `AWS_REGION` | `ap-northeast-2` |
 | `AWS_BACKEND_ROLE_ARN` | `arn:aws:iam::<ACCOUNT_ID>:role/GithubActionsBackendDeployRole` |
-| `ARTIFACT_BUCKET` | `devops-3tier-codedeploy-artifacts-<본인id>` |
+| `ARTIFACT_BUCKET` | `devops-3tier-codedeploy-<본인id>` |
 | `CD_APP_NAME` | `devops-3tier-backend` |
 | `CD_DG_NAME` | `devops-3tier-backend-bg` |
 
