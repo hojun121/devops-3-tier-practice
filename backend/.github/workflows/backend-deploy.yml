@@ -1,0 +1,59 @@
+name: Backend Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARTIFACT_KEY: backend-${{ github.sha }}.zip
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_BACKEND_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Package backend
+        run: |
+          cd backend
+          zip -r ../${{ env.ARTIFACT_KEY }} . \
+            -x "node_modules/*" ".env" "*.log"
+
+      - name: Upload artifact to S3
+        run: |
+          aws s3 cp ${{ env.ARTIFACT_KEY }} \
+            s3://${{ vars.ARTIFACT_BUCKET }}/${{ env.ARTIFACT_KEY }}
+
+      - name: Trigger CodeDeploy
+        id: deploy
+        run: |
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name ${{ vars.CD_APP_NAME }} \
+            --deployment-group-name ${{ vars.CD_DG_NAME }} \
+            --s3-location bucket=${{ vars.ARTIFACT_BUCKET }},key=${{ env.ARTIFACT_KEY }},bundleType=zip \
+            --description "GHA: ${{ github.sha }}" \
+            --query 'deploymentId' --output text)
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "Started deployment: $DEPLOYMENT_ID"
+
+      - name: Wait for deployment to complete
+        timeout-minutes: 30
+        run: |
+          aws deploy wait deployment-successful \
+            --deployment-id ${{ steps.deploy.outputs.deployment_id }}
+          echo "Deployment ${{ steps.deploy.outputs.deployment_id }} succeeded"
