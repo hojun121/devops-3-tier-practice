@@ -547,9 +547,6 @@ EC2 콘솔 > 좌측 **Launch Templates** > **Create launch template**
 **Configure storage**
 - 8 GiB / gp2 또는 gp3
 
-**Resource tags** (선택)
-- Key: `Name`, Value: `backend-asg-instance`. Resource type: Instance
-
 **Advanced details** (펼쳐서 설정)
 
 | 항목 | 값 |
@@ -605,20 +602,6 @@ echo "userdata completed: $(date)"
 - `<DB_PASSWORD>` → 실제 DB 비밀번호
 
 **Create launch template** 클릭.
-
-> ⚠️ userdata에 DB 비밀번호가 평문 저장된다. `ec2:DescribeLaunchTemplateVersions` 권한을 가진 IAM 사용자가 비밀번호를 조회할 수 있다. 실습 환경에서는 허용되지만, 운영 환경에서는 SSM Parameter Store 또는 Secrets Manager로 이전해야 한다.
-
-### 5-3. Launch Template 동작 검증 (선택)
-
-Launch Template으로 EC2 1대를 단독 실행하여 userdata 정상 동작 여부를 확인한다.
-
-EC2 > Instances > **Launch instances**
-
-- Use Launch Template: `backend-lt`, Latest version
-- Subnet: 퍼블릭 서브넷 a
-- 1대 실행
-
-부팅 후 5분 대기 (userdata 실행 시간).
 
 #### SSM Session Manager 접속
 
@@ -705,11 +688,7 @@ EC2 콘솔 > 좌측 **Auto Scaling Groups** > **Create Auto Scaling group**
 
 **Step 5: Add notifications** — 생략, **Next** 클릭.
 
-**Step 6: Add tags** (선택)
-- Key: `Name`, Value: `backend-asg-instance`
-- **Next** 클릭
-
-**Step 7: Review** — 확인 후 **Create Auto Scaling group** 클릭.
+**Step 6: Review** — 확인 후 **Create Auto Scaling group** 클릭.
 
 #### 결과 확인
 
@@ -1023,7 +1002,7 @@ sudo systemctl restart codedeploy-agent
 
 ---
 
-# 다음 단계 (선택)
+# 다음 단계로 배울 것들
 
 - **HTTPS 도입**: ACM 인증서 발급 및 ALB HTTPS 리스너 추가
 - **Frontend CI/CD**: S3 + CloudFront 자동 배포 (별도 가이드 참조)
@@ -1048,5 +1027,4 @@ sudo systemctl restart codedeploy-agent
 9. IAM Role 3개 삭제 (`EC2CodeDeployInstanceRole`, `CodeDeployServiceRole`, `GithubActionsBackendDeployRole`)
 10. IAM Policy 삭제 (`GithubActionsBackendDeployPolicy`)
 11. Security Group 3개 삭제 (`rds-sg` → `backend-sg` → `alb-sg` 순)
-12. (선택) IAM Identity Provider 삭제. 다른 작업에서 재사용하는 경우 유지.
 13. NAT Gateway, EIP, VPC, 서브넷 등 인프라
