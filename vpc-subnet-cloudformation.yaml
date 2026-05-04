@@ -1,0 +1,624 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC (172.16.0.0/23) + 14 subnets + IGW + 2 NAT GWs + 3 Route Tables + 4 Security Groups
+
+Parameters:
+  VpcName:
+    Type: String
+    Default: practice
+    Description: Name prefix for resources
+
+Resources:
+
+  # ===========================================================
+  # VPC
+  # ===========================================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.16.0.0/23
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-vpc
+
+  # ===========================================================
+  # Subnets - AZ-a
+  # ===========================================================
+  PubElbA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.0.0/27
+      AvailabilityZone: !Sub ${AWS::Region}a
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pub-elb-a
+
+  PubNatA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.0.64/27
+      AvailabilityZone: !Sub ${AWS::Region}a
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pub-nat-a
+
+  PubSvcA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.0.128/27
+      AvailabilityZone: !Sub ${AWS::Region}a
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pub-svc-a
+
+  PriElbA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.0.192/27
+      AvailabilityZone: !Sub ${AWS::Region}a
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pri-elb-a
+
+  PriSvcA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.1.0/27
+      AvailabilityZone: !Sub ${AWS::Region}a
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pri-svc-a
+
+  PriDbA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.1.64/27
+      AvailabilityZone: !Sub ${AWS::Region}a
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pri-db-a
+
+  PriMgmtA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.1.128/27
+      AvailabilityZone: !Sub ${AWS::Region}a
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pri-mgmt-a
+
+  # ===========================================================
+  # Subnets - AZ-c
+  # ===========================================================
+  PubElbC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.0.32/27
+      AvailabilityZone: !Sub ${AWS::Region}c
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pub-elb-c
+
+  PubNatC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.0.96/27
+      AvailabilityZone: !Sub ${AWS::Region}c
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pub-nat-c
+
+  PubSvcC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.0.160/27
+      AvailabilityZone: !Sub ${AWS::Region}c
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pub-svc-c
+
+  PriElbC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.0.224/27
+      AvailabilityZone: !Sub ${AWS::Region}c
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pri-elb-c
+
+  PriSvcC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.1.32/27
+      AvailabilityZone: !Sub ${AWS::Region}c
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pri-svc-c
+
+  PriDbC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.1.96/27
+      AvailabilityZone: !Sub ${AWS::Region}c
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pri-db-c
+
+  PriMgmtC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.1.160/27
+      AvailabilityZone: !Sub ${AWS::Region}c
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-pri-mgmt-c
+
+  # ===========================================================
+  # Internet Gateway
+  # ===========================================================
+  Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-igw
+
+  IgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref Igw
+
+  # ===========================================================
+  # NAT Gateways (각 AZ 의 pub-nat 서브넷에 배치)
+  # ===========================================================
+  EipNatA:
+    Type: AWS::EC2::EIP
+    DependsOn: IgwAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-eip-nat-a
+
+  EipNatC:
+    Type: AWS::EC2::EIP
+    DependsOn: IgwAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-eip-nat-c
+
+  NatA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EipNatA.AllocationId
+      SubnetId: !Ref PubNatA
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-nat-a
+
+  NatC:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EipNatC.AllocationId
+      SubnetId: !Ref PubNatC
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-nat-c
+
+  # ===========================================================
+  # Route Tables
+  #   rt-public      : 0.0.0.0/0 -> IGW
+  #   rt-private-a   : 0.0.0.0/0 -> NAT-a
+  #   rt-private-c   : 0.0.0.0/0 -> NAT-c
+  # pri-db-a/c 는 의도적으로 어떤 RT 에도 연관시키지 않음 (main RT 의 local-only 라우팅 → 격리)
+  # ===========================================================
+  RtPublic:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-rt-public
+
+  RtPrivateA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-rt-private-a
+
+  RtPrivateC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${VpcName}-rt-private-c
+
+  # ---------- Default routes ----------
+  RoutePublicDefault:
+    Type: AWS::EC2::Route
+    DependsOn: IgwAttachment
+    Properties:
+      RouteTableId: !Ref RtPublic
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Igw
+
+  RoutePrivateADefault:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RtPrivateA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatA
+
+  RoutePrivateCDefault:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RtPrivateC
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatC
+
+  # ---------- Public subnet associations (6 ea) ----------
+  AssocPubElbA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPublic
+      SubnetId: !Ref PubElbA
+
+  AssocPubElbC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPublic
+      SubnetId: !Ref PubElbC
+
+  AssocPubNatA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPublic
+      SubnetId: !Ref PubNatA
+
+  AssocPubNatC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPublic
+      SubnetId: !Ref PubNatC
+
+  AssocPubSvcA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPublic
+      SubnetId: !Ref PubSvcA
+
+  AssocPubSvcC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPublic
+      SubnetId: !Ref PubSvcC
+
+  # ---------- Private-A associations (pri-elb-a, pri-svc-a, pri-mgmt-a) ----------
+  AssocPriElbA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPrivateA
+      SubnetId: !Ref PriElbA
+
+  AssocPriSvcA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPrivateA
+      SubnetId: !Ref PriSvcA
+
+  AssocPriMgmtA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPrivateA
+      SubnetId: !Ref PriMgmtA
+
+  # ---------- Private-C associations (pri-elb-c, pri-svc-c, pri-mgmt-c) ----------
+  AssocPriElbC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPrivateC
+      SubnetId: !Ref PriElbC
+
+  AssocPriSvcC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPrivateC
+      SubnetId: !Ref PriSvcC
+
+  AssocPriMgmtC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RtPrivateC
+      SubnetId: !Ref PriMgmtC
+
+  # ===========================================================
+  # Security Groups (default SG는 VPC 생성 시 자동 생성, 손대지 않음)
+  # SG 간 순환참조 방지를 위해 본체에는 CIDR 기반 룰만 두고,
+  # SG-to-SG 룰은 모두 별도 리소스로 분리.
+  # ===========================================================
+
+  # ---------- ALB-SG ----------
+  AlbSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: alb-sg
+      GroupDescription: Allow HTTP from anywhere
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP from anywhere
+      SecurityGroupEgress:
+        # dummy: SG-to-SG egress(8080 to BACKEND)는 아래 별도 리소스로 정의.
+        # 이걸 안 두면 CFN이 자동으로 0.0.0.0/0 all-traffic egress를 박음.
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: dummy to suppress default egress
+      Tags:
+        - Key: Name
+          Value: ALB-SG
+
+  # ---------- BACKEND-SG ----------
+  BackendSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: backend-sg
+      GroupDescription: Backend EC2 security group
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP to anywhere
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS to anywhere
+      Tags:
+        - Key: Name
+          Value: BACKEND-SG
+
+  # ---------- RDS-SG ----------
+  RdsSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: rds-sg
+      GroupDescription: RDS security group
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        # 진짜 outbound 0개를 만들기 위한 dummy. 127.0.0.1/32로 묶어
+        # CFN의 자동 0.0.0.0/0 egress 추가를 차단.
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: dummy to block all egress
+      Tags:
+        - Key: Name
+          Value: RDS-SG
+
+  # ---------- BASTION-SG ----------
+  BastionSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: bastion
+      GroupDescription: bastion sg
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH from anywhere
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: dummy to suppress default egress
+      Tags:
+        - Key: Name
+          Value: BASTION-SG
+
+  # ===========================================================
+  # SG-to-SG Rules (순환참조 회피용 별도 리소스)
+  # ===========================================================
+
+  # --- ALB → BACKEND : 8080 ---
+  AlbEgressToBackend8080:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AlbSg
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      DestinationSecurityGroupId: !Ref BackendSg
+      Description: to backend 8080
+
+  BackendIngressFromAlb8080:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref BackendSg
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref AlbSg
+      Description: from alb 8080
+
+  # --- BASTION → BACKEND : 22 ---
+  BastionEgressToBackend22:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref BastionSg
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      DestinationSecurityGroupId: !Ref BackendSg
+      Description: to backend 22
+
+  BackendIngressFromBastion22:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref BackendSg
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      SourceSecurityGroupId: !Ref BastionSg
+      Description: from bastion 22
+
+  # --- BACKEND → RDS : 3306 ---
+  BackendEgressToRds3306:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref BackendSg
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      DestinationSecurityGroupId: !Ref RdsSg
+      Description: to rds 3306
+
+  RdsIngressFromBackend3306:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RdsSg
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref BackendSg
+      Description: from backend 3306
+
+  # --- BASTION → RDS : 3306 ---
+  BastionEgressToRds3306:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref BastionSg
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      DestinationSecurityGroupId: !Ref RdsSg
+      Description: to rds 3306
+
+  RdsIngressFromBastion3306:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RdsSg
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref BastionSg
+      Description: from bastion 3306
+
+# ===========================================================
+# Outputs
+# ===========================================================
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${AWS::StackName}-VpcId
+
+  IgwId:
+    Value: !Ref Igw
+    Export:
+      Name: !Sub ${AWS::StackName}-IgwId
+
+  NatGatewayAId:
+    Value: !Ref NatA
+    Export:
+      Name: !Sub ${AWS::StackName}-NatGatewayAId
+
+  NatGatewayCId:
+    Value: !Ref NatC
+    Export:
+      Name: !Sub ${AWS::StackName}-NatGatewayCId
+
+  RtPublicId:
+    Value: !Ref RtPublic
+    Export:
+      Name: !Sub ${AWS::StackName}-RtPublicId
+
+  RtPrivateAId:
+    Value: !Ref RtPrivateA
+    Export:
+      Name: !Sub ${AWS::StackName}-RtPrivateAId
+
+  RtPrivateCId:
+    Value: !Ref RtPrivateC
+    Export:
+      Name: !Sub ${AWS::StackName}-RtPrivateCId
+
+  PubElbSubnetIds:
+    Value: !Join [",", [!Ref PubElbA, !Ref PubElbC]]
+    Export:
+      Name: !Sub ${AWS::StackName}-PubElbSubnetIds
+
+  PubNatSubnetIds:
+    Value: !Join [",", [!Ref PubNatA, !Ref PubNatC]]
+    Export:
+      Name: !Sub ${AWS::StackName}-PubNatSubnetIds
+
+  PubSvcSubnetIds:
+    Value: !Join [",", [!Ref PubSvcA, !Ref PubSvcC]]
+    Export:
+      Name: !Sub ${AWS::StackName}-PubSvcSubnetIds
+
+  PriElbSubnetIds:
+    Value: !Join [",", [!Ref PriElbA, !Ref PriElbC]]
+    Export:
+      Name: !Sub ${AWS::StackName}-PriElbSubnetIds
+
+  PriSvcSubnetIds:
+    Value: !Join [",", [!Ref PriSvcA, !Ref PriSvcC]]
+    Export:
+      Name: !Sub ${AWS::StackName}-PriSvcSubnetIds
+
+  PriDbSubnetIds:
+    Value: !Join [",", [!Ref PriDbA, !Ref PriDbC]]
+    Export:
+      Name: !Sub ${AWS::StackName}-PriDbSubnetIds
+
+  PriMgmtSubnetIds:
+    Value: !Join [",", [!Ref PriMgmtA, !Ref PriMgmtC]]
+    Export:
+      Name: !Sub ${AWS::StackName}-PriMgmtSubnetIds
+
+  AlbSgId:
+    Value: !Ref AlbSg
+    Export:
+      Name: !Sub ${AWS::StackName}-AlbSgId
+
+  BackendSgId:
+    Value: !Ref BackendSg
+    Export:
+      Name: !Sub ${AWS::StackName}-BackendSgId
+
+  RdsSgId:
+    Value: !Ref RdsSg
+    Export:
+      Name: !Sub ${AWS::StackName}-RdsSgId
+
+  BastionSgId:
+    Value: !Ref BastionSg
+    Export:
+      Name: !Sub ${AWS::StackName}-BastionSgId
