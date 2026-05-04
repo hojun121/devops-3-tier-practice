@@ -556,7 +556,7 @@ EC2 콘솔 > 좌측 **Launch Templates** > **Create launch template**
 | Template version description | `Initial version` (선택) |
 
 **Application and OS Images**
-- Ubuntu Server 26.04 LTS 선택
+- Ubuntu Server 24.04 LTS 선택
 
 **Instance type**: `t3.micro`
 
