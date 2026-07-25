@@ -1,19 +1,32 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
-  AWS VPC Network Stack
-  - VPC (172.16.0.0/23)
-  - 14 Subnets (7 types x 2 AZs)
+  AWS VPC Network Stack (Multi-Stack Ready)
+  - VPC (기본 172.16.0.0/23, 스택별 VpcCidr 파라미터로 변경)
+  - 14 Subnets (7 types x 2 AZs) : Fn::Cidr 로 VpcCidr에서 /27 자동 분할
   - IGW + 2 NAT Gateways (Zonal)
   - 5 Route Tables (rt-public, rt-private-a/c, rt-db-a/c)
+  - 모든 리소스 Name 태그에 프리픽스(스택 이름) 부여
+    => 한 계정에 3개 스택을 배포해도 이름/CIDR/Export 충돌 없음
 
 # ============================================================
 # Parameters
 # ============================================================
 Parameters:
+  NamePrefix:
+    Type: String
+    Default: ""
+    Description: >-
+      리소스 Name 태그 프리픽스. 비워두면 스택 이름(AWS::StackName)을 사용.
+      3개 스택이면 스택 이름을 dev/stg/prod 처럼 다르게 주면 자동으로 구분됨.
+
   VpcCidr:
     Type: String
     Default: 172.16.0.0/23
-    Description: VPC CIDR block
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/23$'
+    ConstraintDescription: "/23 CIDR 이어야 함 (예 172.16.0.0/23)"
+    Description: >-
+      VPC CIDR block (/23 고정). 스택마다 겹치지 않게 다르게 줄 것.
+      예) stack1=172.16.0.0/23, stack2=172.16.2.0/23, stack3=172.16.4.0/23
 
   AzA:
     Type: AWS::EC2::AvailabilityZone::Name
@@ -25,16 +38,29 @@ Parameters:
     Default: ap-northeast-2c
     Description: Availability Zone C
 
-  ProjectName:
-    Type: String
-    Default: my
-    Description: Resource name prefix
+# ============================================================
+# Conditions
+# ============================================================
+Conditions:
+  # NamePrefix가 비어있으면 스택 이름을 프리픽스로 사용
+  UseStackName: !Equals [!Ref NamePrefix, ""]
+
+# ============================================================
+# Mappings (참고용: Fn::Cidr /27 인덱스 <-> 서브넷 배치)
+#   !Cidr [VpcCidr, 16, 5] => /23을 16개의 /27로 분할
+#   idx0  pub-elb-a   idx1  pub-elb-c
+#   idx2  pub-nat-a   idx3  pub-nat-c
+#   idx4  pub-svc-a   idx5  pub-svc-c
+#   idx6  pri-elb-a   idx7  pri-elb-c
+#   idx8  pri-svc-a   idx9  pri-svc-c
+#   idx10 pri-db-a    idx11 pri-db-c
+#   idx12 pri-mgmt-a  idx13 pri-mgmt-c
+# ============================================================
 
 # ============================================================
 # Resources
 # ============================================================
 Resources:
-
   # ----------------------------------------------------------
   # VPC
   # ----------------------------------------------------------
@@ -47,7 +73,7 @@ Resources:
       InstanceTenancy: default     # 가이드 명시: 변경 금지
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-vpc
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-vpc", !Sub "${NamePrefix}-vpc"]
 
   # ----------------------------------------------------------
   # Internet Gateway
@@ -57,7 +83,7 @@ Resources:
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-igw
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-igw", !Sub "${NamePrefix}-igw"]
 
   IgwAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -68,168 +94,160 @@ Resources:
   # ==========================================================
   # Subnets - Public (auto-assign public IPv4 enabled)
   # ==========================================================
-
   # pub-elb (외부 ALB/NLB)
   PubElbA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.0/27
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzA
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: pub-elb-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pub-elb-a", !Sub "${NamePrefix}-pub-elb-a"]
   PubElbC:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.32/27
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzC
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: pub-elb-c
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pub-elb-c", !Sub "${NamePrefix}-pub-elb-c"]
 
   # pub-nat (NAT Gateway 배치용)
   PubNatA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.64/27
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzA
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: pub-nat-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pub-nat-a", !Sub "${NamePrefix}-pub-nat-a"]
   PubNatC:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.96/27
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzC
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: pub-nat-c
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pub-nat-c", !Sub "${NamePrefix}-pub-nat-c"]
 
   # pub-svc (Bastion, 임시 자원)
   PubSvcA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.128/27
+      CidrBlock: !Select [4, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzA
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: pub-svc-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pub-svc-a", !Sub "${NamePrefix}-pub-svc-a"]
   PubSvcC:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.160/27
+      CidrBlock: !Select [5, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzC
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: pub-svc-c
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pub-svc-c", !Sub "${NamePrefix}-pub-svc-c"]
 
   # ==========================================================
   # Subnets - Private (no public IP)
   # ==========================================================
-
   # pri-elb (내부 ALB)
   PriElbA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.192/27
+      CidrBlock: !Select [6, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzA
       Tags:
         - Key: Name
-          Value: pri-elb-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pri-elb-a", !Sub "${NamePrefix}-pri-elb-a"]
   PriElbC:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.224/27
+      CidrBlock: !Select [7, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzC
       Tags:
         - Key: Name
-          Value: pri-elb-c
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pri-elb-c", !Sub "${NamePrefix}-pri-elb-c"]
 
   # pri-svc (애플리케이션 EC2)
   PriSvcA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.1.0/27
+      CidrBlock: !Select [8, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzA
       Tags:
         - Key: Name
-          Value: pri-svc-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pri-svc-a", !Sub "${NamePrefix}-pri-svc-a"]
   PriSvcC:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.1.32/27
+      CidrBlock: !Select [9, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzC
       Tags:
         - Key: Name
-          Value: pri-svc-c
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pri-svc-c", !Sub "${NamePrefix}-pri-svc-c"]
 
   # pri-db (RDS)
   PriDbA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.1.64/27
+      CidrBlock: !Select [10, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzA
       Tags:
         - Key: Name
-          Value: pri-db-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pri-db-a", !Sub "${NamePrefix}-pri-db-a"]
   PriDbC:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.1.96/27
+      CidrBlock: !Select [11, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzC
       Tags:
         - Key: Name
-          Value: pri-db-c
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pri-db-c", !Sub "${NamePrefix}-pri-db-c"]
 
   # pri-mgmt (CI/CD, 모니터링)
   PriMgmtA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.1.128/27
+      CidrBlock: !Select [12, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzA
       Tags:
         - Key: Name
-          Value: pri-mgmt-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pri-mgmt-a", !Sub "${NamePrefix}-pri-mgmt-a"]
   PriMgmtC:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
-      CidrBlock: 172.16.1.160/27
+      CidrBlock: !Select [13, !Cidr [!Ref VpcCidr, 16, 5]]
       AvailabilityZone: !Ref AzC
       Tags:
         - Key: Name
-          Value: pri-mgmt-c
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-pri-mgmt-c", !Sub "${NamePrefix}-pri-mgmt-c"]
 
   # ==========================================================
   # NAT Gateways (Zonal - AZ당 1개)
+  #   * 스택마다 별도 EIP/NAT 생성 => 리소스 자체는 겹치지 않음
+  #   * 단, 계정 EIP 쿼터 주의 (기본 5개, 3스택 x 2 = 6개 => 상향 필요)
   # ==========================================================
-
   EipNatA:
     Type: AWS::EC2::EIP
     DependsOn: IgwAttachment
@@ -237,8 +255,7 @@ Resources:
       Domain: vpc
       Tags:
         - Key: Name
-          Value: eip-nat-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-eip-nat-a", !Sub "${NamePrefix}-eip-nat-a"]
   EipNatC:
     Type: AWS::EC2::EIP
     DependsOn: IgwAttachment
@@ -246,7 +263,7 @@ Resources:
       Domain: vpc
       Tags:
         - Key: Name
-          Value: eip-nat-c
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-eip-nat-c", !Sub "${NamePrefix}-eip-nat-c"]
 
   NatA:
     Type: AWS::EC2::NatGateway
@@ -256,8 +273,7 @@ Resources:
       ConnectivityType: public
       Tags:
         - Key: Name
-          Value: nat-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-nat-a", !Sub "${NamePrefix}-nat-a"]
   NatC:
     Type: AWS::EC2::NatGateway
     Properties:
@@ -266,12 +282,11 @@ Resources:
       ConnectivityType: public
       Tags:
         - Key: Name
-          Value: nat-c
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-nat-c", !Sub "${NamePrefix}-nat-c"]
 
   # ==========================================================
   # Route Tables
   # ==========================================================
-
   # ----- rt-public (모든 pub-* 서브넷) -----
   RtPublic:
     Type: AWS::EC2::RouteTable
@@ -279,8 +294,7 @@ Resources:
       VpcId: !Ref Vpc
       Tags:
         - Key: Name
-          Value: rt-public
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-rt-public", !Sub "${NamePrefix}-rt-public"]
   RtPublicDefaultRoute:
     Type: AWS::EC2::Route
     DependsOn: IgwAttachment
@@ -295,31 +309,26 @@ Resources:
     Properties:
       RouteTableId: !Ref RtPublic
       SubnetId: !Ref PubElbA
-
   AssocPubElbC:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref RtPublic
       SubnetId: !Ref PubElbC
-
   AssocPubNatA:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref RtPublic
       SubnetId: !Ref PubNatA
-
   AssocPubNatC:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref RtPublic
       SubnetId: !Ref PubNatC
-
   AssocPubSvcA:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref RtPublic
       SubnetId: !Ref PubSvcA
-
   AssocPubSvcC:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -333,27 +342,23 @@ Resources:
       VpcId: !Ref Vpc
       Tags:
         - Key: Name
-          Value: rt-private-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-rt-private-a", !Sub "${NamePrefix}-rt-private-a"]
   RtPrivateADefaultRoute:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref RtPrivateA
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatA
-
   AssocPriElbA:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref RtPrivateA
       SubnetId: !Ref PriElbA
-
   AssocPriSvcA:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref RtPrivateA
       SubnetId: !Ref PriSvcA
-
   AssocPriMgmtA:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -367,27 +372,23 @@ Resources:
       VpcId: !Ref Vpc
       Tags:
         - Key: Name
-          Value: rt-private-c
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-rt-private-c", !Sub "${NamePrefix}-rt-private-c"]
   RtPrivateCDefaultRoute:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref RtPrivateC
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatC
-
   AssocPriElbC:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref RtPrivateC
       SubnetId: !Ref PriElbC
-
   AssocPriSvcC:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref RtPrivateC
       SubnetId: !Ref PriSvcC
-
   AssocPriMgmtC:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -401,8 +402,7 @@ Resources:
       VpcId: !Ref Vpc
       Tags:
         - Key: Name
-          Value: rt-db-a
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-rt-db-a", !Sub "${NamePrefix}-rt-db-a"]
   AssocPriDbA:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -416,8 +416,7 @@ Resources:
       VpcId: !Ref Vpc
       Tags:
         - Key: Name
-          Value: rt-db-c
-
+          Value: !If [UseStackName, !Sub "${AWS::StackName}-rt-db-c", !Sub "${NamePrefix}-rt-db-c"]
   AssocPriDbC:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -426,6 +425,7 @@ Resources:
 
 # ============================================================
 # Outputs - 다른 스택에서 ImportValue로 참조 가능
+#   Export 이름은 ${AWS::StackName} 프리픽스라 스택별로 이미 고유함
 # ============================================================
 Outputs:
   VpcId:
@@ -433,7 +433,6 @@ Outputs:
     Value: !Ref Vpc
     Export:
       Name: !Sub ${AWS::StackName}-VpcId
-
   VpcCidr:
     Description: VPC CIDR
     Value: !GetAtt Vpc.CidrBlock
