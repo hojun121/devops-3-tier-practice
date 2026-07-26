@@ -40,7 +40,7 @@ VPC: 실습 VPC
 EC2 콘솔 → 인스턴스 시작
 
 - 이름: `backend-a`
-- AMI: Ubuntu Server 22.04 LTS
+- AMI: Ubuntu Server 24.04 LTS
 - 유형: `t3.micro`
 - 키 페어: `backend-key`
 
