@@ -175,8 +175,9 @@ CodeDeploy가 ASG와 로드밸런서를 다루고, Blue/Green 배포 때 **새�
 1. **IAM → Roles → Create role**
 2. Trusted entity: **AWS service → CodeDeploy → CodeDeploy**
    - `CodeDeploy - ECS` 나 `CodeDeploy - Lambda` 가 아닌 **CodeDeploy** 를 고릅니다.
-3. `AWSCodeDeployRole` 이 자동으로 붙습니다. 여기에 `AmazonEC2FullAccess` 도 검색해 **추가로 체크**합니다. Set Permissions boundary에서 "Use a permissions boundary to control the maximum role permissions" 체크하고 AmazonEC2FullAccess 검색해서 추가
-<img width="1685" height="664" alt="image" src="https://github.com/user-attachments/assets/3174af74-7663-4744-ab6b-62f7a9268eae" />
+3. `AWSCodeDeployRole` 이 자동으로 붙습니다. 여기에 `AmazonEC2FullAccess` 도 검색해 **추가로 체크**합니다. (권한 정책으로 2개를 붙이는 것입니다)
+
+> ⚠️ **Permissions boundary 는 설정하지 마세요.** boundary 는 권한의 상한선이라, 여기에 `AmazonEC2FullAccess` 를 넣으면 그 정책에 없는 `iam:PassRole` 이 차단됩니다. 그러면 5번에서 추가할 인라인 정책이 무력화되어 첫 배포가 실패합니다.
 4. 이름: `codedeploy-service-role` → 생성
 
 이후, 생성된 'codedeploy-service-role' 검색해서 직접 들어가기
@@ -262,8 +263,8 @@ GitHub Actions가 비밀 키 없이 AWS에 접근하도록 OIDC 방식으로 연
         "codedeploy:GetApplicationRevision"
       ],
       "Resource": [
-        "arn:aws:codedeploy:ap-northeast-2:<ACCOUNT_ID>:application:devops-3tier-backend",
-        "arn:aws:codedeploy:ap-northeast-2:<ACCOUNT_ID>:deploymentgroup:devops-3tier-backend/devops-3tier-backend-bg",
+        "arn:aws:codedeploy:ap-northeast-2:<ACCOUNT_ID>:application:guestbook-backend",
+        "arn:aws:codedeploy:ap-northeast-2:<ACCOUNT_ID>:deploymentgroup:guestbook-backend/guestbook-backend-dg",
         "arn:aws:codedeploy:ap-northeast-2:<ACCOUNT_ID>:deploymentconfig:*"
       ]
     }
@@ -353,7 +354,7 @@ chown -R ubuntu:ubuntu /home/ubuntu/backend
    - Load balancer: **Enable** → Application Load Balancer → Target group: **`tg-...`**
    - Deployment settings
      - *Traffic rerouting*: **Reroute traffic immediately**
-     - *Original instances*: 기존 서버를 일정 시간 뒤 종료 (예: 0~5분)
+     - *Original instances*: 기존 서버를 일정 시간 뒤 종료 → **1분** 권장 (새 버전에 문제가 보이면 이 시간 안에 기존 서버로 롤백할 수 있는 보험입니다. 길게 잡으면 그만큼 배포 완료 표시도 늦어집니다)
      - Deployment configuration: `CodeDeployDefault.AllAtOnce`
    - **Create deployment group**
 
