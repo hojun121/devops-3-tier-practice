@@ -172,19 +172,20 @@ CodeDeploy가 가져갈 배포 파일(zip)을 보관할 버킷입니다.
 
 CodeDeploy가 ASG와 로드밸런서를 다루고, Blue/Green 배포 때 **새로 띄우는 서버(Green)에 위 `backend-ec2-role` 을 붙일 수 있게** 해주는 역할입니다.
 
+**먼저 역할을 만듭니다.**
+
 1. **IAM → Roles → Create role**
 2. Trusted entity: **AWS service → CodeDeploy → CodeDeploy**
    - `CodeDeploy - ECS` 나 `CodeDeploy - Lambda` 가 아닌 **CodeDeploy** 를 고릅니다.
-3. `AWSCodeDeployRole` 이 자동으로 붙습니다. 여기에 `AmazonEC2FullAccess` 도 검색해 **추가로 체크**합니다. (권한 정책으로 2개를 붙이는 것입니다)
+3. *Add permissions* 화면에는 `AWSCodeDeployRole` 이 자동으로 잡혀 있고, **이 화면에서는 정책을 더 추가할 수 없습니다.** 아무것도 바꾸지 말고 **Next** 를 누릅니다.
+   > ⚠️ 이 화면 아래쪽의 **"Set permissions boundary"** 섹션도 **절대 건드리지 마세요** (기본값 *Create role without a permissions boundary* 유지). 검색창이 있어서 여기에 `AmazonEC2FullAccess` 를 체크하고 싶어지는데, boundary 는 권한을 주는 게 아니라 **권한의 상한선**입니다. 여기에 넣으면 그 정책에 없는 `iam:PassRole` 이 차단되어, 아래 6번에서 추가할 인라인 정책이 무력화되고 첫 배포가 실패합니다.
+4. 이름: `codedeploy-service-role` → **Create role**
 
-> ⚠️ **Permissions boundary 는 설정하지 마세요.** boundary 는 권한의 상한선이라, 여기에 `AmazonEC2FullAccess` 를 넣으면 그 정책에 없는 `iam:PassRole` 이 차단됩니다. 그러면 5번에서 추가할 인라인 정책이 무력화되어 첫 배포가 실패합니다.
-4. 이름: `codedeploy-service-role` → 생성
+**이어서 생성된 역할에 권한 2개를 추가합니다.** IAM → Roles 에서 `codedeploy-service-role` 을 검색해 클릭한 뒤, **Permissions 탭**에서:
 
-이후, 생성된 'codedeploy-service-role' 검색해서 직접 들어가기
-<img width="1701" height="538" alt="image" src="https://github.com/user-attachments/assets/6e8acb84-47f0-4ce3-b0b3-dcd154f37127" />
-
-5. 생성된 역할에서 **Add permissions → Create inline policy → JSON** 으로 아래를 추가합니다.
-<img width="2000" height="993" alt="image" src="https://github.com/user-attachments/assets/8111c3e3-544a-4465-a7d2-88ff6be15d6b" />
+5. **Add permissions → Attach policies** → `AmazonEC2FullAccess` 검색 · 체크 → **Add permissions**
+   - Blue/Green 이 Launch Template 으로 새 서버(Green ASG)를 만들 때 필요한 EC2 권한입니다.
+6. **Add permissions → Create inline policy → JSON 탭** 으로 전환한 뒤 아래를 붙여넣습니다. `<ACCOUNT_ID>` 는 본인 계정 ID 12자리로 치환!
 
 
    ```json
@@ -199,9 +200,9 @@ CodeDeploy가 ASG와 로드밸런서를 다루고, Blue/Green 배포 때 **새�
      ]
    }
    ```
-<img width="1703" height="864" alt="image" src="https://github.com/user-attachments/assets/bce57345-3aa5-4f6d-b7be-bc0bcc1cdd15" />
+7. **Next** → Policy name: `AllowPassBackendEc2Role` → **Create policy**
 
-   정책 이름: `AllowPassBackendEc2Role` → **Create policy**
+완료되면 Permissions 탭에 **3개**가 보여야 합니다: `AWSCodeDeployRole` `AmazonEC2FullAccess` (관리형 2개) + `AllowPassBackendEc2Role` (인라인 1개).
 
 > InlinePolicy 생성을 빼먹으면 **첫 배포의 첫 단계(새 서버 provisioning)** 에서 다음 오류로 멈춥니다.
 > `The IAM role does not give you permission to perform operations in the following AWS service: AmazonAutoScaling`
