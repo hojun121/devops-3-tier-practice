@@ -18,7 +18,7 @@ const SERVER_IP = Object.values(os.networkInterfaces())
   .filter(iface => iface.family === 'IPv4' && !iface.internal)
   .map(iface => iface.address)[0] || 'unknown';
 
-console.log(`Server starting: ${SERVER_ID} (${SERVER_IP})`);
+console.log(`Server starting2222: ${SERVER_ID} (${SERVER_IP})`);
 
 // ========================================
 // DB 연결 풀
