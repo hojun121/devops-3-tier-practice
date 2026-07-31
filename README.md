@@ -2,7 +2,7 @@
 
 이 실습에서는 백엔드 서버를 **Auto Scaling Group + CodeDeploy(Blue/Green)** 기반의 자동 배포 파이프라인으로 직접 구성해 봅니다.
 
-네트워크 · RDS · ALB · S3 · CloudFront 등 기본 인프라는 CloudFormation으로 이미 올라가 있습니다. 여기서는 그 위에 **백엔드 배포 자동화**를 얹어, 코드를 push하면 무중단으로 새 버전이 배포되는 흐름을 완성하는 것이 목표입니다.
+네트워크 · RDS · ALB · S3 · CloudFront 등 기본 인프라는 CloudFormation 템플릿 하나로 올립니다(2단계). 단, **백엔드 EC2 계층만은 템플릿에 없습니다** — 그 빈자리에 Launch Template · Auto Scaling Group · CodeDeploy 기반의 자동 배포 파이프라인을 직접 구성해, 코드를 push하면 무중단으로 새 버전이 배포되는 흐름을 완성하는 것이 목표입니다.
 
 ```
 git push  →  GitHub Actions  →  S3  →  CodeDeploy(Blue/Green)  →  Auto Scaling Group
@@ -47,22 +47,27 @@ backend-cicd/
 
 ---
 
-## 2. 인프라에서 정적 EC2 걷어내기
+## 2. 인프라 올리기 — CloudFormation 스택 생성
 
-현재 인프라에는 백엔드용 EC2 2대(`backend-a`, `backend-c`)가 고정으로 떠 있습니다. 이건 부팅할 때 코드를 한 번 받아오는 단순한 구조라, CI/CD로 전환하려면 먼저 이 EC2를 걷어내야 합니다.
+**`3tier-app-cloudformation-no-ec2.yaml`** 하나로 백엔드 EC2를 제외한 인프라 전체를 만듭니다.
 
-이를 위해 **`3tier-app-cloudformation-no-ec2.yaml`** 로 기존 스택을 업데이트합니다. 이 템플릿은 정적 EC2와 그 IAM 역할, 그리고 타겟 그룹에 고정돼 있던 대상을 빼둔 버전입니다. 비워진 EC2 자리는 이후 단계에서 Auto Scaling Group과 CodeDeploy로 채웁니다.
+- **네트워크** — VPC, 서브넷 6종 × 2AZ, AZ별 NAT Gateway 2개, S3 Gateway Endpoint
+- **보안그룹 3개 (SG-to-SG 최소 개방)** — `ALB(80/443) → EC2(8080) → RDS(3306)` 체인. EC2의 80/443 아웃바운드(패키지 설치·CodeDeploy 에이전트·npm)만 추가로 열려 있습니다.
+- **데이터** — RDS MySQL + 스키마 자동 초기화(Lambda)
+- **입구** — ALB + **빈 타겟 그룹**(8080), CloudFront + 프론트엔드 S3(파일 자동 업로드)
+
+백엔드 EC2 계층만 비어 있고, 그 자리는 이후 단계에서 Auto Scaling Group과 CodeDeploy로 채웁니다. 새로 만들 백엔드 EC2는 **프라이빗 서브넷**(`pri-svc-a/c`)에 배치됩니다.
 
 ### 진행
 
-1. **CloudFormation → 기존 스택 선택 → Update**
-2. *Prepare template* → **Replace existing template**
-3. *Template source* → **Upload a template file** → `3tier-app-cloudformation-no-ec2.yaml` 선택 → **Next**
-4. 파라미터는 그대로 두고 **Next → Next**
-5. IAM 리소스 생성 동의 체크박스 ☑ → **Submit**
-6. `UPDATE_COMPLETE` 가 되면, EC2 콘솔에서 `backend-a` · `backend-c` 가 사라졌는지 확인합니다.
+1. **CloudFormation → Create stack → With new resources (standard)**
+2. *Template source* → **Upload a template file** → `3tier-app-cloudformation-no-ec2.yaml` 선택 → **Next**
+3. Stack name: `guestbook` (다른 이름도 가능 — 리소스 이름에 접미사로 붙습니다) → 파라미터는 기본값 그대로 **Next → Next**
+4. IAM 리소스 생성 동의 체크박스 ☑ → **Submit**
+5. `CREATE_COMPLETE` (약 10~15분, RDS와 CloudFront가 오래 걸립니다) 후 **Outputs 탭의 값들을 메모**해 둡니다 — 이후 단계에서 계속 사용합니다.
+6. Outputs의 `CloudFrontURL` 로 접속하면 방명록 페이지가 뜹니다.
 
-> 이 시점에는 사이트의 `/api/*` 요청이 잠시 503으로 응답합니다. 타겟 그룹이 비어 있기 때문이며, 정상적인 상태입니다. 7단계(ASG)와 10단계(첫 배포)를 마치면 다시 정상으로 돌아옵니다.
+> 이 시점에는 사이트의 `/api/*` 요청이 503으로 응답합니다. 백엔드가 아직 없어 타겟 그룹이 비어 있기 때문이며, 정상적인 상태입니다. 7단계(ASG)와 10단계(첫 배포)를 마치면 정상으로 돌아옵니다.
 
 ---
 
@@ -75,10 +80,12 @@ backend-cicd/
 ```
 사용자 → CloudFront (HTTPS)
    ├ 일반 요청(*) → S3 (정적 프론트엔드)
-   └ /api/*       → ALB(:80) → 타겟 그룹 → 백엔드 EC2(:8080) → RDS MySQL(:3306)
-                                              ▲
-                                  이번 실습에서 만드는 부분
+   └ /api/*       → ALB(:80, 퍼블릭) → 타겟 그룹 → 백엔드 EC2(:8080, 프라이빗) → RDS MySQL(:3306, 프라이빗)
+                                                        ▲
+                                            이번 실습에서 만드는 부분
 ```
+
+백엔드 EC2는 **프라이빗 서브넷**(`pri-svc`)에 있어 인터넷에서 직접 접근할 수 없습니다. 서버가 밖으로 나가는 트래픽(패키지 설치 · CodeDeploy 에이전트 · S3 다운로드)은 AZ별 **NAT Gateway**(`pub-nat` 서브넷의 nat-a/nat-c)를 경유하고, 서버 접속은 SSH 대신 **SSM**으로 합니다(12단계 참고).
 
 ### 배포가 일어나는 순서 (Blue/Green)
 
@@ -277,7 +284,7 @@ Auto Scaling Group이 서버를 찍어낼 때 쓰는 틀입니다. 부팅 시 No
 4. Instance type: `t3.micro`
 5. Key pair: 없음 (SSM으로 접속)
 6. Network settings
-   - **Auto-assign public IP**: **Enable** — 이 실습에서는 EC2를 퍼블릭 서브넷(`pub-svc`)에 두고, **인터넷 게이트웨이로 직접 아웃바운드**(Node.js · CodeDeploy 에이전트 · npm 다운로드)합니다. NAT 대신 인스턴스의 퍼블릭 IP로 나가는 구조입니다. (항목이 안 보이면 *Advanced network configuration* 을 펼치면 있습니다.)
+   - **Auto-assign public IP**: **Disable** — EC2는 프라이빗 서브넷(`pri-svc`)에 배치되어 퍼블릭 IP가 없습니다. 아웃바운드(Node.js · CodeDeploy 에이전트 · npm 다운로드)는 같은 AZ의 **NAT Gateway**를 경유하고, S3 아티팩트는 라우트 테이블에 붙은 **S3 Gateway Endpoint**로 내려받습니다. (항목이 안 보이면 *Advanced network configuration* 을 펼치면 있습니다.)
    - **Security groups**: `backend-sg` 선택 (Outputs의 `BackendSgId`)
    - 서브넷은 여기서 지정하지 않습니다. ASG가 정합니다.
 7. Advanced details → **IAM instance profile**: `backend-ec2-role`
@@ -323,7 +330,7 @@ chown -R ubuntu:ubuntu /home/ubuntu/backend
 
 1. **EC2 → Auto Scaling Groups → Create**
 2. 이름: `backend-asg`, Launch template: `backend-lt` → Next
-3. Network: VPC(`VpcId`), 서브넷 **`pub-svc-a`, `pub-svc-c`** (`BackendSubnets`) → Next
+3. Network: VPC(`VpcId`), 서브넷 **`pri-svc-a`, `pri-svc-c`** (`BackendSubnets`) → Next
 4. **Load balancing**: *Attach to an existing load balancer* → *Choose from your load balancer target groups* → **`tg-...`** (`TargetGroupName`)
 5. **Health checks**: **EC2** 선택, grace period `300`
 6. Group size: Desired `2`, Min `2`, Max `4` → 생성
@@ -411,6 +418,55 @@ chown -R ubuntu:ubuntu /home/ubuntu/backend
    - 배포 후: `{"status":"ok","version":"v2","server":...}`
 
    이 `version` 필드가 새로 보이면 바꾼 코드가 CI/CD로 배포된 것입니다. Blue/Green으로 전환되는 동안에도 사이트는 끊김 없이 계속 동작합니다.
+
+---
+
+## 12. (부록) EC2 서버 접속하기 — SSM
+
+백엔드 EC2는 프라이빗 서브넷에 있고 backend-sg 에 SSH(22) 인바운드도 없어, SSH 접속은 아예 불가능합니다. 대신 **SSM(Session Manager)** 으로 접속합니다. 필요한 준비는 이미 끝나 있습니다.
+
+- SSM 에이전트: Ubuntu 24.04 AMI 에 기본 설치되어 있음
+- 권한: 5-1 에서 `backend-ec2-role` 에 붙인 `AmazonSSMManagedInstanceCore`
+- 네트워크: backend-sg 의 443 아웃바운드 → NAT 경유 (에이전트가 SSM 서비스로 폴링하는 구조라 인바운드가 필요 없음)
+
+### 방법 1 — 콘솔에서 접속
+
+1. **EC2 → Instances** 에서 인스턴스 선택 → **Connect**
+2. **Session Manager** 탭 → **Connect**
+
+브라우저에 바로 셸이 열립니다. 기본 사용자는 `ssm-user` 이므로, 앱 파일을 보려면 ubuntu 사용자로 전환합니다.
+
+```bash
+sudo su - ubuntu
+pm2 list                  # 앱 프로세스 확인
+ls /home/ubuntu/backend   # 배포된 코드 확인
+```
+
+### 방법 2 — 로컬에서 AWS CLI로 접속
+
+로컬 PC에 [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)와 [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)이 설치되어 있고 자격 증명이 설정되어 있어야 합니다.
+
+```bash
+# 실행 중인 백엔드 서버의 인스턴스 ID 확인
+aws ec2 describe-instances --region ap-northeast-2 \
+  --filters "Name=instance-state-name,Values=running" "Name=tag:aws:autoscaling:groupName,Values=*backend-asg*" \
+  --query "Reservations[].Instances[].InstanceId" --output text
+
+# 셸 접속
+aws ssm start-session --region ap-northeast-2 --target i-xxxxxxxxxxxxxxxxx
+```
+
+### 포트 포워딩 — 로컬에서 서버의 8080 열어보기
+
+SSM 터널로 서버의 8080 포트를 내 PC 포트에 바인딩할 수 있습니다. SG 인바운드를 열지 않아도 됩니다 (443 아웃바운드 터널을 그대로 이용).
+
+```bash
+aws ssm start-session --region ap-northeast-2 --target i-xxxxxxxxxxxxxxxxx \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters portNumber="8080",localPortNumber="8080"
+```
+
+세션이 열린 상태에서 브라우저로 `http://localhost:8080/api/health` 에 접속하면 ALB를 거치지 않고 해당 서버의 응답을 직접 확인할 수 있습니다. 특정 서버가 unhealthy 일 때 그 서버만 콕 집어 확인하는 용도로 유용합니다. 확인이 끝나면 터미널에서 `Ctrl+C` 로 세션을 종료합니다.
 
 ---
 

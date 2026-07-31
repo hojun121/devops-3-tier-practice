@@ -2,9 +2,10 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   devops-3-tier-practice - 3-Tier infra WITHOUT backend EC2 (no-ec2 edition).
   VPC + NAT x2 + ALB(빈 TargetGroup) + RDS MySQL + S3 + CloudFront/OAC.
-  정적 EC2(BackendA/C)와 EC2용 IAM(Ec2Role/Profile)을 제거한 버전.
-  백엔드 EC2 계층은 콘솔에서 Launch Template + Auto Scaling Group + CodeDeploy(Blue/Green)로 직접 구성한다.
-  NOTE: SG 3개(alb/ec2/rds) 모두 in/out 0.0.0.0/0 전체개방 (실습 전용).
+  백엔드 EC2 계층만 비워둔 완성형 인프라 - 빈자리는 학생이 콘솔에서
+  Launch Template + Auto Scaling Group + CodeDeploy(Blue/Green)로 직접 구성한다.
+  NOTE: SG 3개(alb/ec2/rds)는 SG-to-SG 최소 개방 - ALB(80/443) → EC2(8080) → RDS(3306).
+  백엔드 EC2는 프라이빗 서브넷(pri-svc) 배치, 아웃바운드는 AZ별 NAT 경유, 접속은 SSM.
 
 # ============================================================ Parameters
 Parameters:
@@ -50,7 +51,7 @@ Resources:
       VpcId: !Ref Vpc
       InternetGatewayId: !Ref Igw
 
-  # ========================================================== Subnets (7종 x 2AZ)
+  # ========================================================== Subnets (6종 x 2AZ)
   PubElbA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -83,22 +84,6 @@ Resources:
       AvailabilityZone: !Select [2, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags: [{ Key: Name, Value: pub-nat-c }]
-  PubSvcA:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.128/27
-      AvailabilityZone: !Select [0, !GetAZs '']
-      MapPublicIpOnLaunch: true
-      Tags: [{ Key: Name, Value: pub-svc-a }]
-  PubSvcC:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref Vpc
-      CidrBlock: 172.16.0.160/27
-      AvailabilityZone: !Select [2, !GetAZs '']
-      MapPublicIpOnLaunch: true
-      Tags: [{ Key: Name, Value: pub-svc-c }]
   PriElbA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -156,7 +141,7 @@ Resources:
       AvailabilityZone: !Select [2, !GetAZs '']
       Tags: [{ Key: Name, Value: pri-mgmt-c }]
 
-  # ========================================================== NAT x2
+  # ========================================================== NAT x2 (zonal, AZ별)
   NatEipA:
     Type: AWS::EC2::EIP
     Properties: { Domain: vpc }
@@ -217,13 +202,11 @@ Resources:
       VpcId: !Ref Vpc
       Tags: [{ Key: Name, Value: rt-db }]
 
-  # ---- Public associations (pub-elb, pub-nat, pub-svc x2)
+  # ---- Public associations (pub-elb, pub-nat x2)
   AssocPubElbA: { Type: AWS::EC2::SubnetRouteTableAssociation, Properties: { SubnetId: !Ref PubElbA, RouteTableId: !Ref RtPublic } }
   AssocPubElbC: { Type: AWS::EC2::SubnetRouteTableAssociation, Properties: { SubnetId: !Ref PubElbC, RouteTableId: !Ref RtPublic } }
   AssocPubNatA: { Type: AWS::EC2::SubnetRouteTableAssociation, Properties: { SubnetId: !Ref PubNatA, RouteTableId: !Ref RtPublic } }
   AssocPubNatC: { Type: AWS::EC2::SubnetRouteTableAssociation, Properties: { SubnetId: !Ref PubNatC, RouteTableId: !Ref RtPublic } }
-  AssocPubSvcA: { Type: AWS::EC2::SubnetRouteTableAssociation, Properties: { SubnetId: !Ref PubSvcA, RouteTableId: !Ref RtPublic } }
-  AssocPubSvcC: { Type: AWS::EC2::SubnetRouteTableAssociation, Properties: { SubnetId: !Ref PubSvcC, RouteTableId: !Ref RtPublic } }
   # ---- Private-a associations
   AssocPriElbA:  { Type: AWS::EC2::SubnetRouteTableAssociation, Properties: { SubnetId: !Ref PriElbA,  RouteTableId: !Ref RtPrivateA } }
   AssocPriSvcA:  { Type: AWS::EC2::SubnetRouteTableAssociation, Properties: { SubnetId: !Ref PriSvcA,  RouteTableId: !Ref RtPrivateA } }
@@ -246,34 +229,62 @@ Resources:
       VpcEndpointType: Gateway
       RouteTableIds: [!Ref RtPrivateA, !Ref RtPrivateC]
 
-  # ========================================================== Security Groups (전체 개방)
+  # ========================================================== Security Groups (SG-to-SG 최소 개방)
+  # ALB(80/443) → EC2(8080) → RDS(3306) 체인. 순환 참조 방지를 위해
+  # 앞 SG가 뒤 SG를 바라보는 egress는 별도 SecurityGroupEgress 리소스로 분리.
   AlbSg:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: alb-sg
-      GroupDescription: ALB SG - ALL open in/out (lab)
+      GroupDescription: ALB SG - in 80/443 from anywhere, out 8080 to backend-sg only
       VpcId: !Ref Vpc
-      SecurityGroupIngress: [{ IpProtocol: '-1', CidrIp: 0.0.0.0/0 }]
-      SecurityGroupEgress:  [{ IpProtocol: '-1', CidrIp: 0.0.0.0/0 }]
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80,  ToPort: 80,  CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
       Tags: [{ Key: Name, Value: alb-sg }]
+  AlbSgEgressToEc2:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AlbSg
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      DestinationSecurityGroupId: !Ref Ec2Sg
   Ec2Sg:
     Type: AWS::EC2::SecurityGroup
     # 학생이 Launch Template 에서 이 SG(backend-sg)를 선택한다.
+    # DbInit Lambda 도 이 SG 를 사용한다 (PyPI/S3/RDS 접근).
     Properties:
       GroupName: backend-sg
-      GroupDescription: EC2 SG - ALL open in/out (lab)
+      GroupDescription: EC2 SG - in 8080 from alb-sg, out 3306 to rds-sg + 80/443 for CD pipeline
       VpcId: !Ref Vpc
-      SecurityGroupIngress: [{ IpProtocol: '-1', CidrIp: 0.0.0.0/0 }]
-      SecurityGroupEgress:  [{ IpProtocol: '-1', CidrIp: 0.0.0.0/0 }]
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !Ref AlbSg }
+      SecurityGroupEgress:
+        # 80/443 아웃바운드는 CD 파이프라인 필수: userdata(apt/nodesource),
+        # CodeDeploy agent 폴링, S3 아티팩트 다운로드, npm ci, Lambda 의 PyPI 접근
+        - { IpProtocol: tcp, FromPort: 80,  ToPort: 80,  CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
       Tags: [{ Key: Name, Value: backend-sg }]
+  Ec2SgEgressToRds:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref Ec2Sg
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      DestinationSecurityGroupId: !Ref RdsSg
   RdsSg:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: rds-sg
-      GroupDescription: RDS SG - ALL open in/out (lab)
+      GroupDescription: RDS SG - in 3306 from backend-sg only, no outbound
       VpcId: !Ref Vpc
-      SecurityGroupIngress: [{ IpProtocol: '-1', CidrIp: 0.0.0.0/0 }]
-      SecurityGroupEgress:  [{ IpProtocol: '-1', CidrIp: 0.0.0.0/0 }]
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 3306, ToPort: 3306, SourceSecurityGroupId: !Ref Ec2Sg }
+      # egress 를 비우면 CFN 이 기본 all-open 을 남기므로, 루프백 더미 규칙으로 사실상 차단
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 127.0.0.1/32 }
       Tags: [{ Key: Name, Value: rds-sg }]
 
   # ========================================================== RDS MySQL
@@ -332,9 +343,10 @@ Resources:
         SecurityGroupIds: [!Ref Ec2Sg]
       Code:
         ZipFile: |
-          import json, urllib.request, sys, io, zipfile
+          import json, time, urllib.request, sys, io, zipfile
 
           # cfnresponse 의존 제거: 직접 presigned URL 로 PUT (S3 Gateway Endpoint 경유)
+          # 스택 삭제 중 네트워크 경로 철거와 겹치면 일시적 reset 이 날 수 있어 재시도한다
           def send(event, ctx, status, reason=None):
               body = json.dumps({
                   'Status': status,
@@ -343,9 +355,17 @@ Resources:
                   'StackId': event['StackId'], 'RequestId': event['RequestId'],
                   'LogicalResourceId': event['LogicalResourceId'], 'Data': {},
               }).encode()
-              req = urllib.request.Request(event['ResponseURL'], data=body, method='PUT',
-                  headers={'content-type': '', 'content-length': str(len(body))})
-              urllib.request.urlopen(req, timeout=30)
+              for i in range(5):
+                  try:
+                      req = urllib.request.Request(event['ResponseURL'], data=body, method='PUT',
+                          headers={'content-type': '', 'content-length': str(len(body))})
+                      urllib.request.urlopen(req, timeout=30)
+                      return
+                  except Exception as e:
+                      print(f'send attempt {i+1} failed:', e)
+                      if i == 4:
+                          raise
+                      time.sleep(10)
 
           def handler(event, ctx):
               try:
@@ -373,7 +393,10 @@ Resources:
   DbInit:
     Type: AWS::CloudFormation::CustomResource
     # NAT 경로/서브넷 연결이 끝난 뒤 실행되도록 보장 (Lambda 인터넷 접근)
-    DependsOn: [RtPrivateADefault, RtPrivateCDefault, AssocPriSvcA, AssocPriSvcC]
+    # S3Endpoint 포함 이유: 삭제 시 DbInit 의 응답(PUT)이 S3 로 나가는 경로가
+    # 먼저 철거되면 Connection reset 으로 DELETE_FAILED 가 난다. DependsOn 은
+    # 삭제 순서도 보장하므로(역순), DbInit 이 네트워크 경로보다 먼저 삭제된다.
+    DependsOn: [RtPrivateADefault, RtPrivateCDefault, AssocPriSvcA, AssocPriSvcC, S3Endpoint]
     Properties:
       ServiceToken: !GetAtt DbInitFn.Arn
       Host: !GetAtt RdsInstance.Endpoint.Address
@@ -584,8 +607,8 @@ Outputs:
     Description: ASG/Launch Template 생성 시 사용할 VPC
     Value: !Ref Vpc
   BackendSubnets:
-    Description: ASG 에 지정할 서브넷 (pub-svc-a, pub-svc-c)
-    Value: !Sub '${PubSvcA},${PubSvcC}'
+    Description: ASG 에 지정할 서브넷 (pri-svc-a, pri-svc-c)
+    Value: !Sub '${PriSvcA},${PriSvcC}'
   BackendSgId:
     Description: Launch Template 에 지정할 보안그룹 (backend-sg)
     Value: !Ref Ec2Sg
