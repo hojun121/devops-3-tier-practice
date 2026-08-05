@@ -12,6 +12,7 @@ git push  →  GitHub Actions  →  S3  →  CodeDeploy(Blue/Green)  →  Auto S
 
 ---
 
+
 ## 1. 시작하기 — 브랜치 받기
 
 먼저 작업 브랜치를 받습니다.
