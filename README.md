@@ -8,7 +8,7 @@
 git push  →  GitHub Actions  →  S3  →  CodeDeploy(Blue/Green)  →  Auto Scaling Group
 ```
 
-> 진행 환경: AWS 리전 **서울(ap-northeast-2)**, 콘솔 기준.
+> 진행 환경: AWS 리전 **서울(ap-northeast-2)**, 콘솔 기준!
 
 ---
 
